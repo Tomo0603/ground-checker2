@@ -1,91 +1,290 @@
-name: グラウンド空き監視
+import { chromium } from 'playwright';
+import fs from 'fs';
 
-on:
-  schedule:
-    # 1時間ごとに実行（UTC時刻）
-    - cron: '0 * * * *'
-  workflow_dispatch:  # 手動実行も可能
+// ========== 設定 ==========
+// ここを編集して監視したい施設を追加・変更してください
 
-permissions:
-  issues: write
-  contents: read
+const GROUNDS_CONFIG = [
+  {
+    name: '保土ケ谷公園 サッカー場',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'サッカー場'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '境川遊水地公園 多目的グラウンド',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['スポーツ施設', '境川遊水地公園', '多目的グラウンド'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '県立スポーツセンター 球技場（天然芝）',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（天然芝）'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '県立スポーツセンター 球技場（人工芝）',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（人工芝）'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '茅ヶ崎・柳島スポーツ公園',
+    kind: 'chigasaki',
+    url: 'https://yoyaku.city.chigasaki.kanagawa.jp/cultos/reserve/gin_init2',
+    keywords: ['空き', '○', '◯', '空有']
+  }
+];
 
-jobs:
-  check-availability:
-    runs-on: ubuntu-latest
+const STATE_FILE = 'state.json';
+
+// ========== ユーティリティ関数 ==========
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const data = fs.readFileSync(STATE_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('状態の読み込みエラー:', error.message);
+  }
+  return { notifiedSlots: [] };
+}
+
+function saveState(state) {
+  try {
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (error) {
+    console.error('状態の保存エラー:', error.message);
+  }
+}
+
+function extractAvailability(html, keywords) {
+  const availableSlots = [];
+  const lines = html.split('\n');
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     
-    steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
+    if (!keywords.some(keyword => line.includes(keyword))) continue;
+    
+    const context = lines.slice(Math.max(0, i - 2), i + 3).join(' ');
+    
+    const datePatterns = [
+      /(\d{1,2})月(\d{1,2})日/,
+      /(\d{1,2})\/(\d{1,2})/,
+      /(\d{4})-(\d{1,2})-(\d{1,2})/
+    ];
+    
+    const timePatterns = [
+      /(\d{1,2}):(\d{2})/,
+      /午前|午後|AM|PM/,
+      /\d{1,2}時/
+    ];
+    
+    const hasDate = datePatterns.some(pattern => pattern.test(context));
+    const hasTime = timePatterns.some(pattern => pattern.test(context));
+    
+    if (hasDate || hasTime) {
+      const cleanContext = context
+        .replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 100);
       
-      - name: Node.jsセットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      if (cleanContext && !availableSlots.includes(cleanContext)) {
+        availableSlots.push(cleanContext);
+      }
+    }
+  }
+  
+  return availableSlots;
+}
+
+// ========== チェック処理 ==========
+
+async function checkEKanagawa(page, ground) {
+  console.log(`  📍 URL: ${ground.url}`);
+  
+  await page.goto(ground.url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  
+  try {
+    await page.click('input[value*="施設"]');
+    console.log('  ✓ 施設検索ページに遷移');
+  } catch (e) {
+    console.log('  ℹ️ 既に施設検索ページ');
+  }
+  
+  await page.waitForTimeout(2000);
+  
+  for (const pathItem of ground.facilityPath) {
+    console.log(`  🔽 "${pathItem}" を選択中...`);
+    
+    const clicked = await page.evaluate((text) => {
+      const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
+      const target = links.find(el => el.textContent.includes(text) || el.value?.includes(text));
+      if (target) {
+        target.click();
+        return true;
+      }
+      return false;
+    }, pathItem);
+    
+    if (!clicked) {
+      throw new Error(`"${pathItem}" が見つかりません`);
+    }
+    
+    console.log(`  ✓ "${pathItem}" を選択`);
+    await page.waitForTimeout(2000);
+  }
+  
+  const html = await page.content();
+  const available = extractAvailability(html, ground.keywords);
+  
+  console.log(`  📊 検出結果: ${available.length}件の空き`);
+  
+  return { available };
+}
+
+async function checkChigasaki(page, ground) {
+  console.log(`  📍 URL: ${ground.url}`);
+  
+  await page.goto(ground.url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  
+  const html = await page.content();
+  const available = extractAvailability(html, ground.keywords);
+  
+  console.log(`  📊 検出結果: ${available.length}件の空き`);
+  
+  return { available };
+}
+
+async function checkGeneric(page, ground) {
+  console.log(`  📍 URL: ${ground.url}`);
+  
+  await page.goto(ground.url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(2000);
+  
+  const html = await page.content();
+  const available = extractAvailability(html, ground.keywords);
+  
+  console.log(`  📊 検出結果: ${available.length}件の空き`);
+  
+  return { available };
+}
+
+// ========== メイン処理 ==========
+
+async function main() {
+  console.log('===========================================');
+  console.log(`チェック開始: ${new Date().toLocaleString('ja-JP')}`);
+  console.log('===========================================');
+  
+  const state = loadState();
+  const notifiedSet = new Set(state.notifiedSlots || []);
+  
+  let newAvailabilityFound = false;
+  const results = [];
+  
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+  
+  try {
+    for (const ground of GROUNDS_CONFIG) {
+      console.log(`\n🔍 チェック中: ${ground.name}`);
       
-      - name: 依存関係をインストール
-        run: npm install
+      const page = await browser.newPage();
       
-      - name: Playwrightブラウザをインストール
-        run: npx playwright install chromium --with-deps
+      try {
+        let result;
+        
+        switch (ground.kind) {
+          case 'ekanagawa':
+            result = await checkEKanagawa(page, ground);
+            break;
+          case 'chigasaki':
+            result = await checkChigasaki(page, ground);
+            break;
+          default:
+            result = await checkGeneric(page, ground);
+        }
+        
+        const groundResult = {
+          name: ground.name,
+          allSlots: result.available || [],
+          newSlots: []
+        };
+        
+        if (result.available && result.available.length > 0) {
+          result.available.forEach(slot => {
+            const slotKey = `${ground.name}|${slot}`;
+            if (!notifiedSet.has(slotKey)) {
+              console.log(`  🆕 新規空き: ${slot}`);
+              groundResult.newSlots.push(slot);
+              notifiedSet.add(slotKey);
+              newAvailabilityFound = true;
+            } else {
+              console.log(`  ℹ️  既知の空き: ${slot}`);
+            }
+          });
+        }
+        
+        results.push(groundResult);
+        
+      } catch (error) {
+        console.error(`  ❌ エラー: ${error.message}`);
+        results.push({
+          name: ground.name,
+          error: error.message,
+          allSlots: [],
+          newSlots: []
+        });
+      } finally {
+        await page.close();
+      }
       
-      - name: 前回の状態を復元
-        uses: actions/cache@v4
-        with:
-          path: state.json
-          key: notification-state-${{ github.run_id }}
-          restore-keys: |
-            notification-state-
-      
-      - name: グラウンド空きチェック
-        id: check
-        run: node check-github.js
-        continue-on-error: true
-      
-      - name: 新しい空きが見つかった場合にIssue作成
-        if: steps.check.outputs.new_availability == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
-            
-            let body = '新しい空き枠が見つかりました！\n\n';
-            
-            result.forEach(item => {
-              if (item.newSlots && item.newSlots.length > 0) {
-                body += `## 🎉 ${item.name}\n\n`;
-                item.newSlots.forEach(slot => {
-                  body += `- ${slot}\n`;
-                });
-                body += '\n';
-              }
-            });
-            
-            body += `\n---\n検出時刻: ${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}`;
-            
-            // 新しいIssueを作成
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🎉 グラウンド空き発見！ (${new Date().toLocaleDateString('ja-JP')})`,
-              body: body,
-              labels: ['空き通知']
-            });
-      
-      - name: 状態を保存
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: state.json
-          key: notification-state-${{ github.run_id }}
-      
-      - name: ログをアップロード
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: check-logs-${{ github.run_number }}
-          path: |
-            *.log
-            *.json
-          retention-days: 7
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+  } finally {
+    await browser.close();
+  }
+  
+  // 状態を保存
+  if (newAvailabilityFound) {
+    state.notifiedSlots = Array.from(notifiedSet);
+    state.lastUpdate = new Date().toISOString();
+    saveState(state);
+  }
+  
+  // 結果をファイルに保存（GitHub Actionsで使用）
+  fs.writeFileSync('result.json', JSON.stringify(results, null, 2), 'utf8');
+  
+  // GitHub Actions の output を設定
+  if (process.env.GITHUB_OUTPUT) {
+    fs.appendFileSync(
+      process.env.GITHUB_OUTPUT,
+      `new_availability=${newAvailabilityFound}\n`
+    );
+  }
+  
+  console.log('\n===========================================');
+  console.log(`チェック完了: ${new Date().toLocaleString('ja-JP')}`);
+  console.log(`新規空き発見: ${newAvailabilityFound ? 'あり' : 'なし'}`);
+  console.log('===========================================');
+}
+
+main().catch(error => {
+  console.error('エラーが発生しました:', error);
+  process.exit(1);
+});
