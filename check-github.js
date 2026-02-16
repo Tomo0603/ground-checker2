@@ -2,10 +2,9 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 
 // ========== 設定 ==========
-// ここを編集して監視したい施設を追加・変更してください
 
 const GROUNDS_CONFIG = [
-  // 神奈川県のe-kanagawaシステム
+  // 神奈川県（e-kanagawaシステム）
   {
     name: '保土ヶ谷公園 サッカー場',
     kind: 'ekanagawa',
@@ -42,7 +41,7 @@ const GROUNDS_CONFIG = [
     keywords: ['空き', '○', '◯', '空有']
   },
   
-  // 海老名市のe-kanagawaシステム
+  // 海老名市（e-kanagawaシステム）
   {
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
@@ -58,7 +57,7 @@ const GROUNDS_CONFIG = [
     keywords: ['空き', '○', '◯', '空有']
   },
   
-  // 茅ヶ崎市システム
+  // 茅ヶ崎市
   {
     name: '茅ヶ崎・柳島スポーツ公園',
     kind: 'chigasaki',
@@ -151,13 +150,24 @@ async function checkEKanagawa(page, ground) {
       console.log('  ℹ️ 既に施設検索ページ');
     }
   } else {
-    // 海老名市の場合は直接施設選択
     console.log('  ℹ️ 海老名市システム - 施設選択画面');
   }
   
   // facilityPathを辿る
-  for (const pathItem of ground.facilityPath) {
+  for (let i = 0; i < ground.facilityPath.length; i++) {
+    const pathItem = ground.facilityPath[i];
     console.log(`  🔽 "${pathItem}" を選択中...`);
+    
+    // デバッグ: 利用可能なオプションを表示
+    const availableOptions = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
+      return links
+        .map(el => el.textContent?.trim() || el.value?.trim() || '')
+        .filter(t => t.length > 0 && t.length < 100)
+        .slice(0, 30);
+    });
+    
+    console.log(`  💡 利用可能なオプション: ${availableOptions.join(', ')}`);
     
     const clicked = await page.evaluate((text) => {
       const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
@@ -173,7 +183,7 @@ async function checkEKanagawa(page, ground) {
     }, pathItem);
     
     if (!clicked) {
-      throw new Error(`"${pathItem}" が見つかりません`);
+      throw new Error(`"${pathItem}" が見つかりません。利用可能: ${availableOptions.slice(0, 5).join(', ')}`);
     }
     
     console.log(`  ✓ "${pathItem}" を選択`);
@@ -303,7 +313,7 @@ async function main() {
     saveState(state);
   }
   
-  // 結果をファイルに保存（GitHub Actionsで使用）
+  // 結果をファイルに保存
   fs.writeFileSync('result.json', JSON.stringify(results, null, 2), 'utf8');
   
   // GitHub Actions の output を設定
