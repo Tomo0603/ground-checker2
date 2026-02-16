@@ -5,18 +5,26 @@ import fs from 'fs';
 // ここを編集して監視したい施設を追加・変更してください
 
 const GROUNDS_CONFIG = [
+  // 神奈川県のe-kanagawaシステム
   {
-    name: '保土ケ谷公園 サッカー場',
+    name: '保土ヶ谷公園 サッカー場',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'サッカー場'],
+    facilityPath: ['スポーツ施設', '保土ヶ谷公園', 'サッカー場'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
-    name: '境川遊水地公園 多目的グラウンド',
+    name: '保土ヶ谷公園 ラグビー場全面',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['スポーツ施設', '境川遊水地公園', '多目的グラウンド'],
+    facilityPath: ['スポーツ施設', '保土ヶ谷公園', 'ラグビー場全面'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '境川遊水池公園 多目的グラウンド',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['スポーツ施設', '境川遊水池公園', '多目的グラウンド'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
@@ -33,6 +41,24 @@ const GROUNDS_CONFIG = [
     facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（人工芝）'],
     keywords: ['空き', '○', '◯', '空有']
   },
+  
+  // 海老名市のe-kanagawaシステム
+  {
+    name: '海老名運動公園陸上競技場 陸上競技場',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Ebina/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['海老名運動公園陸上競技場', '陸上競技場'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  {
+    name: '中野公園人工芝グラウンド グラウンド',
+    kind: 'ekanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Ebina/Web/Wg_ModeSelect.aspx',
+    facilityPath: ['中野公園人工芝グラウンド', 'グラウンド'],
+    keywords: ['空き', '○', '◯', '空有']
+  },
+  
+  // 茅ヶ崎市システム
   {
     name: '茅ヶ崎・柳島スポーツ公園',
     kind: 'chigasaki',
@@ -115,21 +141,30 @@ async function checkEKanagawa(page, ground) {
   await page.goto(ground.url, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2000);
   
-  try {
-    await page.click('input[value*="施設"]');
-    console.log('  ✓ 施設検索ページに遷移');
-  } catch (e) {
-    console.log('  ℹ️ 既に施設検索ページ');
+  // 施設検索ページへの遷移（神奈川県の場合のみ）
+  if (ground.url.includes('/Kanagawa/')) {
+    try {
+      await page.click('input[value*="施設"]');
+      console.log('  ✓ 施設検索ページに遷移');
+      await page.waitForTimeout(2000);
+    } catch (e) {
+      console.log('  ℹ️ 既に施設検索ページ');
+    }
+  } else {
+    // 海老名市の場合は直接施設選択
+    console.log('  ℹ️ 海老名市システム - 施設選択画面');
   }
   
-  await page.waitForTimeout(2000);
-  
+  // facilityPathを辿る
   for (const pathItem of ground.facilityPath) {
     console.log(`  🔽 "${pathItem}" を選択中...`);
     
     const clicked = await page.evaluate((text) => {
       const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
-      const target = links.find(el => el.textContent.includes(text) || el.value?.includes(text));
+      const target = links.find(el => {
+        const content = el.textContent || el.value || '';
+        return content.includes(text);
+      });
       if (target) {
         target.click();
         return true;
@@ -186,6 +221,7 @@ async function checkGeneric(page, ground) {
 async function main() {
   console.log('===========================================');
   console.log(`チェック開始: ${new Date().toLocaleString('ja-JP')}`);
+  console.log(`監視施設数: ${GROUNDS_CONFIG.length}件`);
   console.log('===========================================');
   
   const state = loadState();
