@@ -6,24 +6,24 @@ import fs from 'fs';
 const GROUNDS_CONFIG = [
   // 神奈川県（e-kanagawaシステム）
   {
-    name: '保土ヶ谷公園 サッカー場',
+    name: '保土ケ谷公園 サッカー場',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['スポーツ施設', '保土ヶ谷公園', 'サッカー場'],
+    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'サッカー場'],  // ケ
     keywords: ['空き', '○', '◯', '空有']
   },
   {
-    name: '保土ヶ谷公園 ラグビー場全面',
+    name: '保土ケ谷公園 ラグビー場全面',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['スポーツ施設', '保土ヶ谷公園', 'ラグビー場全面'],
+    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'ラグビー場全面'],  // ケ
     keywords: ['空き', '○', '◯', '空有']
   },
   {
-    name: '境川遊水池公園 多目的グラウンド',
+    name: '境川遊水地公園 多目的グラウンド',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['スポーツ施設', '境川遊水池公園', '多目的グラウンド'],
+    facilityPath: ['スポーツ施設', '境川遊水地公園', '多目的グラウンド'],  // 地
     keywords: ['空き', '○', '◯', '空有']
   },
   {
@@ -46,14 +46,14 @@ const GROUNDS_CONFIG = [
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Ebina/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['海老名運動公園陸上競技場', '陸上競技場'],
+    facilityPath: ['スポーツ施設', '海老名運動公園陸上競技場', '陸上競技場'],  // スポーツ施設から
     keywords: ['空き', '○', '◯', '空有']
   },
   {
     name: '中野公園人工芝グラウンド グラウンド',
     kind: 'ekanagawa',
     url: 'https://yoyaku.e-kanagawa.lg.jp/Ebina/Web/Wg_ModeSelect.aspx',
-    facilityPath: ['中野公園人工芝グラウンド', 'グラウンド'],
+    facilityPath: ['スポーツ施設', '中野公園人工芝グラウンド', 'グラウンド'],  // スポーツ施設から
     keywords: ['空き', '○', '◯', '空有']
   },
   
@@ -149,25 +149,11 @@ async function checkEKanagawa(page, ground) {
     } catch (e) {
       console.log('  ℹ️ 既に施設検索ページ');
     }
-  } else {
-    console.log('  ℹ️ 海老名市システム - 施設選択画面');
   }
   
   // facilityPathを辿る
-  for (let i = 0; i < ground.facilityPath.length; i++) {
-    const pathItem = ground.facilityPath[i];
+  for (const pathItem of ground.facilityPath) {
     console.log(`  🔽 "${pathItem}" を選択中...`);
-    
-    // デバッグ: 利用可能なオプションを表示
-    const availableOptions = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
-      return links
-        .map(el => el.textContent?.trim() || el.value?.trim() || '')
-        .filter(t => t.length > 0 && t.length < 100)
-        .slice(0, 30);
-    });
-    
-    console.log(`  💡 利用可能なオプション: ${availableOptions.join(', ')}`);
     
     const clicked = await page.evaluate((text) => {
       const links = Array.from(document.querySelectorAll('a, input[type="submit"], button'));
@@ -183,7 +169,7 @@ async function checkEKanagawa(page, ground) {
     }, pathItem);
     
     if (!clicked) {
-      throw new Error(`"${pathItem}" が見つかりません。利用可能: ${availableOptions.slice(0, 5).join(', ')}`);
+      throw new Error(`"${pathItem}" が見つかりません`);
     }
     
     console.log(`  ✓ "${pathItem}" を選択`);
