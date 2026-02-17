@@ -122,52 +122,82 @@ async function checkChugai(browser, ground) {
   const page = await context.newPage();
 
   try {
-    console.log(`  📍 menuURL: ${ground.menuUrl}`);
+    // menu=25のページへ
+    console.log(`  📍 ${ground.menuUrl}`);
     await page.goto(ground.menuUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    
-    // JS描画を待つために追加で待機
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
-    console.log(`  ✓ ページ: ${await page.title()}`);
+    // HTML内の「予約可」リンクをすべて取得
+    const reserveLinks = await page.evaluate(() => {
+      const results = [];
+      // href付きのすべてのaタグ
+      Array.from(document.querySelectorAll('a[href]')).forEach(el => {
+        const href = el.href;
+        const text = el.textContent?.trim() || '';
+        // 予約系URLを含むもの
+        if (href.includes('reserve') || href.includes('yoyaku') || 
+            href.includes('date') || href.includes('menu') ||
+            href.includes('calendar') || href.includes('schedule')) {
+          results.push({ text, href });
+        }
+      });
+      return results;
+    });
 
-    // ページ全体のテキストを取得してダンプ
-    const bodyText = await page.evaluate(() => document.body.innerText);
-    console.log(`  📄 ページテキスト（先頭1000文字）:`);
-    console.log(bodyText.substring(0, 1000).replace(/\n+/g, '\n'));
+    console.log(`  🔗 予約関連リンク (${reserveLinks.length}件):`);
+    reserveLinks.slice(0, 10).forEach(l => console.log(`     "${l.text}" → ${l.href}`));
 
-    // HTMLもダンプ（キーワード周辺）
-    const html = await page.content();
-    console.log(`  📄 HTML長: ${html.length}文字`);
+    // HTMLから直接「予約可」テキストを含む要素のhrefを探す
+    const allHrefs = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a'))
+        .map(el => ({ text: el.textContent?.trim(), href: el.href }))
+        .filter(l => l.href && !l.href.endsWith('#'))
+        .slice(0, 50);
+    });
 
-    // 「○」や空きキーワードがHTMLに存在するか確認
-    for (const kw of ground.keywords) {
-      const count = (html.match(new RegExp(kw, 'g')) || []).length;
-      if (count > 0) console.log(`  🔍 "${kw}" がHTML内に ${count} 件存在`);
+    // 「chugai-pharm」を含むリンクを全て表示
+    const chugaiLinks = allHrefs.filter(l => l.href.includes('chugai-pharm'));
+    console.log(`  🔗 chugai-pharmリンク一覧:`);
+    chugaiLinks.forEach(l => console.log(`     "${l.text}" → ${l.href}`));
+
+    // HTML内のscriptタグからURLを探す
+    const scriptUrls = await page.evaluate(() => {
+      const scripts = Array.from(document.querySelectorAll('script'));
+      const urls = [];
+      scripts.forEach(s => {
+        const matches = s.textContent?.match(/https?:\/\/[^\s"']+chugai[^\s"']*/g) || [];
+        urls.push(...matches);
+      });
+      return [...new Set(urls)];
+    });
+    if (scriptUrls.length > 0) {
+      console.log(`  📜 scriptタグ内URL: ${scriptUrls.join(', ')}`);
     }
 
-    // divベースで空き情報を探す（テーブルがない場合）
-    const divText = await page.evaluate((keywords) => {
-      const results = [];
-      // すべての要素のテキストを検索
-      const allEls = Array.from(document.querySelectorAll('*'));
-      for (const el of allEls) {
-        const text = el.textContent?.trim() || '';
-        if (text.length < 5 || text.length > 200) continue;
-        if (keywords.some(kw => text.includes(kw))) {
-          if (/\d{1,2}[\/月]\d{1,2}|\d{1,2}:\d{2}|午前|午後/.test(text)) {
-            results.push(text.substring(0, 100));
-          }
-        }
+    // カレンダーAPIを直接試す（EDISONEシステムの一般的なパターン）
+    const calendarUrls = [
+      `https://www.chugailspyokohamayoyaku.jp/chugai-pharm/reserve?menu=25`,
+      `https://www.chugailspyokohamayoyaku.jp/chugai-pharm/calendar?menu=25`,
+      `https://www.chugailspyokohamayoyaku.jp/chugai-pharm/schedule?menu=25`,
+    ];
+
+    for (const calUrl of calendarUrls) {
+      try {
+        await page.goto(calUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await page.waitForTimeout(2000);
+        const title = await page.title();
+        const url = page.url();
+        const bodyText = (await page.evaluate(() => document.body.innerText)).substring(0, 300);
+        console.log(`  📅 試行: ${calUrl}`);
+        console.log(`     → タイトル: ${title}`);
+        console.log(`     → URL: ${url}`);
+        console.log(`     → テキスト: ${bodyText.substring(0, 100)}`);
+      } catch (e) {
+        console.log(`  📅 ${calUrl} → エラー: ${e.message.substring(0, 50)}`);
       }
-      return [...new Set(results)].slice(0, 20);
-    }, ground.keywords);
+    }
 
-    console.log(`  📊 div検索結果: ${divText.length}件`);
-    divText.forEach(t => console.log(`     → ${t}`));
-
-    const available = divText.filter(t => ground.keywords.some(kw => t.includes(kw)));
-    console.log(`  📊 最終検出結果: ${available.length}件の空き`);
-    return { available };
+    return { available: [] };
   } finally {
     await page.close();
   }
@@ -235,7 +265,6 @@ async function main() {
 
   console.log('\n===========================================');
   console.log(`チェック完了: ${new Date().toLocaleString('ja-JP')}`);
-  console.log(`新規空き発見: ${newAvailabilityFound ? 'あり' : 'なし'}`);
   console.log('===========================================');
 }
 
