@@ -1,10 +1,7 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
 
-// ========== 設定 ==========
-
 const GROUNDS_CONFIG = [
-  // 海老名市（✅ 動作確認済み）
   {
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
@@ -19,8 +16,6 @@ const GROUNDS_CONFIG = [
     facilityPath: ['スポーツ施設', '中野公園人工芝グラウンド', 'グラウンド'],
     keywords: ['空き', '○', '◯', '空有']
   },
-
-  // 中外製薬横浜グラウンド（✅ ログイン確認済み、menu=25がグラウンド）
   {
     name: '中外ライフサイエンスパーク横浜 グラウンド',
     kind: 'chugai',
@@ -31,8 +26,6 @@ const GROUNDS_CONFIG = [
 ];
 
 const STATE_FILE = 'state.json';
-
-// ========== ユーティリティ ==========
 
 function loadState() {
   try {
@@ -71,13 +64,10 @@ function extractAvailabilityGeneric(html, keywords) {
   return availableSlots;
 }
 
-// ========== 海老名チェック ==========
-
 async function checkEKanagawa(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
   await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(2000);
-
   for (const pathItem of ground.facilityPath) {
     console.log(`  🔽 "${pathItem}" を選択中...`);
     const clicked = await clickItem(page, pathItem);
@@ -85,13 +75,10 @@ async function checkEKanagawa(page, ground) {
     console.log(`  ✓ "${pathItem}" を選択`);
     await page.waitForTimeout(2000);
   }
-
   const available = extractAvailabilityGeneric(await page.content(), ground.keywords);
   console.log(`  📊 検出結果: ${available.length}件の空き`);
   return { available };
 }
-
-// ========== 中外製薬チェック ==========
 
 let chugaiLoggedIn = false;
 let chugaiContext = null;
@@ -115,10 +102,7 @@ async function ensureChugaiLogin(browser) {
   const hasPassword = await page.$('input[type="password"]');
   if (hasPassword) {
     for (const sel of ['input[type="text"]', 'input[name*="id" i]', 'input[name*="user" i]']) {
-      try {
-        const el = await page.$(sel);
-        if (el) { await el.fill(loginId); break; }
-      } catch (e) {}
+      try { const el = await page.$(sel); if (el) { await el.fill(loginId); break; } } catch (e) {}
     }
     await page.fill('input[type="password"]', password);
     for (const sel of ['button[type="submit"]', 'input[type="submit"]']) {
@@ -129,7 +113,6 @@ async function ensureChugaiLogin(browser) {
     console.log(`  ✓ ログイン完了`);
     chugaiLoggedIn = true;
   }
-
   await page.close();
   return chugaiContext;
 }
@@ -141,51 +124,58 @@ async function checkChugai(browser, ground) {
   try {
     console.log(`  📍 menuURL: ${ground.menuUrl}`);
     await page.goto(ground.menuUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2000);
+    
+    // JS描画を待つために追加で待機
+    await page.waitForTimeout(5000);
 
     console.log(`  ✓ ページ: ${await page.title()}`);
 
-    // テーブルを行単位で取得
-    const tableRows = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('table tr'));
-      return rows.map(row => {
-        const cells = Array.from(row.querySelectorAll('td, th'));
-        return cells.map(c => c.textContent?.trim() || '').join(' | ');
-      }).filter(r => r.trim());
-    });
+    // ページ全体のテキストを取得してダンプ
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    console.log(`  📄 ページテキスト（先頭1000文字）:`);
+    console.log(bodyText.substring(0, 1000).replace(/\n+/g, '\n'));
 
-    console.log(`  📊 テーブル行数: ${tableRows.length}`);
-    if (tableRows.length > 0) {
-      console.log(`  📊 最初の15行:`);
-      tableRows.slice(0, 15).forEach(row => console.log(`     ${row}`));
+    // HTMLもダンプ（キーワード周辺）
+    const html = await page.content();
+    console.log(`  📄 HTML長: ${html.length}文字`);
+
+    // 「○」や空きキーワードがHTMLに存在するか確認
+    for (const kw of ground.keywords) {
+      const count = (html.match(new RegExp(kw, 'g')) || []).length;
+      if (count > 0) console.log(`  🔍 "${kw}" がHTML内に ${count} 件存在`);
     }
 
-    // 空き検出
-    const availableSlots = [];
-    for (const row of tableRows) {
-      if (!ground.keywords.some(kw => row.includes(kw))) continue;
-      // 「×」だけの行はスキップ（全埋まり）
-      if (row.replace(/[|×\s]/g, '') === '') continue;
-      const hasDate = /\d{1,2}月\d{1,2}日|\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}\/\d{1,2}/.test(row);
-      const hasTime = /\d{1,2}:\d{2}|\d{1,2}時|午前|午後/.test(row);
-      if ((hasDate || hasTime) && !availableSlots.includes(row)) {
-        availableSlots.push(row.substring(0, 100));
+    // divベースで空き情報を探す（テーブルがない場合）
+    const divText = await page.evaluate((keywords) => {
+      const results = [];
+      // すべての要素のテキストを検索
+      const allEls = Array.from(document.querySelectorAll('*'));
+      for (const el of allEls) {
+        const text = el.textContent?.trim() || '';
+        if (text.length < 5 || text.length > 200) continue;
+        if (keywords.some(kw => text.includes(kw))) {
+          if (/\d{1,2}[\/月]\d{1,2}|\d{1,2}:\d{2}|午前|午後/.test(text)) {
+            results.push(text.substring(0, 100));
+          }
+        }
       }
-    }
+      return [...new Set(results)].slice(0, 20);
+    }, ground.keywords);
 
-    console.log(`  📊 検出結果: ${availableSlots.length}件の空き`);
-    return { available: availableSlots };
+    console.log(`  📊 div検索結果: ${divText.length}件`);
+    divText.forEach(t => console.log(`     → ${t}`));
+
+    const available = divText.filter(t => ground.keywords.some(kw => t.includes(kw)));
+    console.log(`  📊 最終検出結果: ${available.length}件の空き`);
+    return { available };
   } finally {
     await page.close();
   }
 }
 
-// ========== メイン ==========
-
 async function main() {
   console.log('===========================================');
   console.log(`チェック開始: ${new Date().toLocaleString('ja-JP')}`);
-  console.log(`監視施設数: ${GROUNDS_CONFIG.length}件`);
   console.log('===========================================');
 
   const state = loadState();
@@ -201,17 +191,13 @@ async function main() {
   try {
     for (const ground of GROUNDS_CONFIG) {
       console.log(`\n🔍 チェック中: ${ground.name}`);
-
       try {
         let result;
         if (ground.kind === 'ekanagawa') {
           const page = await browser.newPage();
-          try { result = await checkEKanagawa(page, ground); }
-          finally { await page.close(); }
+          try { result = await checkEKanagawa(page, ground); } finally { await page.close(); }
         } else if (ground.kind === 'chugai') {
           result = await checkChugai(browser, ground);
-        } else {
-          throw new Error(`未知のkind: ${ground.kind}`);
         }
 
         const groundResult = { name: ground.name, allSlots: result.available || [], newSlots: [] };
@@ -229,7 +215,6 @@ async function main() {
         console.error(`  ❌ エラー: ${error.message}`);
         results.push({ name: ground.name, error: error.message, allSlots: [], newSlots: [] });
       }
-
       await new Promise(r => setTimeout(r, 2000));
     }
   } finally {
