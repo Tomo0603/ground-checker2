@@ -4,45 +4,7 @@ import fs from 'fs';
 // ========== 設定 ==========
 
 const GROUNDS_CONFIG = [
-  // 神奈川県（e-kanagawa）
-  // ※ ログイン不要の空き照会ページに直接アクセス
-  {
-    name: '保土ケ谷公園 サッカー場',
-    kind: 'ekanagawa_kanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
-    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'サッカー場'],
-    keywords: ['空き', '○', '◯', '空有']
-  },
-  {
-    name: '保土ケ谷公園 ラグビー場全面',
-    kind: 'ekanagawa_kanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
-    facilityPath: ['スポーツ施設', '保土ケ谷公園', 'ラグビー場全面'],
-    keywords: ['空き', '○', '◯', '空有']
-  },
-  {
-    name: '境川遊水地公園 多目的グラウンド',
-    kind: 'ekanagawa_kanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
-    facilityPath: ['スポーツ施設', '境川遊水地公園', '多目的グラウンド'],
-    keywords: ['空き', '○', '◯', '空有']
-  },
-  {
-    name: '県立スポーツセンター 球技場（天然芝）',
-    kind: 'ekanagawa_kanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
-    facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（天然芝）'],
-    keywords: ['空き', '○', '◯', '空有']
-  },
-  {
-    name: '県立スポーツセンター 球技場（人工芝）',
-    kind: 'ekanagawa_kanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
-    facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（人工芝）'],
-    keywords: ['空き', '○', '◯', '空有']
-  },
-
-  // 海老名市（e-kanagawa） ← 前回成功
+  // 海老名市（動作確認済み ✅）
   {
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
@@ -64,6 +26,14 @@ const GROUNDS_CONFIG = [
     kind: 'chigasaki',
     url: 'https://yoyaku.city.chigasaki.kanagawa.jp/cultos/reserve/gin_init2',
     keywords: ['空き', '○', '◯', '空有']
+  },
+
+  // 中外製薬横浜（自動ログイン）
+  {
+    name: '中外製薬横浜グラウンド',
+    kind: 'chugai',
+    url: 'https://www.chugailspyokohamayoyaku.jp/chugai-pharm',
+    keywords: ['空き', '○', '◯', '予約可', '利用可']
   }
 ];
 
@@ -108,41 +78,7 @@ async function clickItem(page, text) {
   }, text);
 }
 
-// ========== 神奈川県チェック（直接URLアクセス） ==========
-
-async function checkEKanagawaKanagawa(page, ground) {
-  console.log(`  📍 URL: ${ground.url}`);
-  await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
-  await page.waitForTimeout(2000);
-
-  const topOpts = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('a, input[type="submit"], button'))
-      .map(el => (el.textContent || el.value || '').trim()).filter(t => t.length > 0)
-  );
-  console.log(`  📋 ページのオプション: ${topOpts.join(' | ')}`);
-
-  for (const pathItem of ground.facilityPath) {
-    console.log(`  🔽 "${pathItem}" を選択中...`);
-    const clicked = await clickItem(page, pathItem);
-    if (!clicked) {
-      const opts = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('a, input[type="submit"], button'))
-          .map(el => (el.textContent || el.value || '').trim())
-          .filter(t => t.length > 0 && t.length < 80).slice(0, 30)
-      );
-      console.log(`  💡 現在のオプション: ${opts.join(' | ')}`);
-      throw new Error(`"${pathItem}" が見つかりません`);
-    }
-    console.log(`  ✓ "${pathItem}" を選択`);
-    await page.waitForTimeout(2000);
-  }
-
-  const available = extractAvailability(await page.content(), ground.keywords);
-  console.log(`  📊 検出結果: ${available.length}件の空き`);
-  return { available };
-}
-
-// ========== 海老名チェック ==========
+// ========== 海老名チェック（✅ 動作確認済み） ==========
 
 async function checkEKanagawa(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
@@ -156,7 +92,7 @@ async function checkEKanagawa(page, ground) {
       const opts = await page.evaluate(() =>
         Array.from(document.querySelectorAll('a, input[type="submit"], button'))
           .map(el => (el.textContent || el.value || '').trim())
-          .filter(t => t.length > 0 && t.length < 80).slice(0, 30)
+          .filter(t => t.length > 0 && t.length < 80).slice(0, 20)
       );
       console.log(`  💡 現在のオプション: ${opts.join(' | ')}`);
       throw new Error(`"${pathItem}" が見つかりません`);
@@ -170,12 +106,102 @@ async function checkEKanagawa(page, ground) {
   return { available };
 }
 
-// ========== 茅ヶ崎チェック ==========
+// ========== 茅ヶ崎チェック（タイムアウト対策済み） ==========
 
 async function checkChigasaki(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
+
+  // networkidle ではなく domcontentloaded で待機 + タイムアウト延長
+  await page.goto(ground.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await page.waitForTimeout(5000);
+
+  const title = await page.title();
+  console.log(`  📋 ページタイトル: ${title}`);
+
+  const available = extractAvailability(await page.content(), ground.keywords);
+  console.log(`  📊 検出結果: ${available.length}件の空き`);
+  return { available };
+}
+
+// ========== 中外製薬チェック（自動ログイン） ==========
+
+async function checkChugai(page, ground) {
+  const loginId = process.env.CHUGAI_LOGIN_ID;
+  const password = process.env.CHUGAI_PASSWORD;
+
+  if (!loginId || !password) {
+    throw new Error('CHUGAI_LOGIN_ID または CHUGAI_PASSWORD が未設定です（GitHub Secretsを確認）');
+  }
+
+  console.log(`  📍 URL: ${ground.url}`);
   await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(2000);
+
+  const title = await page.title();
+  console.log(`  📋 ページタイトル: ${title}`);
+
+  // ログインフォームの検出
+  const hasPassword = await page.$('input[type="password"]');
+  if (hasPassword) {
+    console.log('  🔐 ログインページを検出 → 自動ログイン中...');
+
+    // ID入力（複数のセレクタを試す）
+    const idSelectors = [
+      'input[type="text"]',
+      'input[name*="id" i]',
+      'input[name*="user" i]',
+      'input[name*="login" i]',
+      'input[id*="id" i]',
+      'input[id*="user" i]',
+    ];
+    for (const sel of idSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.fill(loginId);
+          console.log(`  ✓ ID入力完了`);
+          break;
+        }
+      } catch (e) {}
+    }
+
+    // パスワード入力
+    await page.fill('input[type="password"]', password);
+    console.log('  ✓ パスワード入力完了');
+
+    // ログインボタンクリック
+    const loginBtns = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:has-text("ログイン")',
+      'input[value*="ログイン"]',
+      'input[value*="LOGIN"]',
+      'button:has-text("Sign")',
+    ];
+    for (const sel of loginBtns) {
+      try {
+        await page.click(sel);
+        console.log(`  ✓ ログインボタンクリック`);
+        break;
+      } catch (e) {}
+    }
+
+    await page.waitForTimeout(3000);
+    await page.waitForLoadState('networkidle').catch(() => {});
+    console.log(`  ✓ ログイン後のページ: ${await page.title()}`);
+  } else {
+    console.log('  ℹ️ ログイン不要 or 既にログイン済み');
+  }
+
+  // ページ内のリンクをデバッグ表示
+  const links = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('a, button'))
+      .map(el => el.textContent?.trim())
+      .filter(t => t && t.length > 0 && t.length < 50)
+      .slice(0, 20)
+  );
+  console.log(`  💡 ページ内リンク: ${links.join(' | ')}`);
+
   const available = extractAvailability(await page.content(), ground.keywords);
   console.log(`  📊 検出結果: ${available.length}件の空き`);
   return { available };
@@ -206,12 +232,11 @@ async function main() {
 
       try {
         let result;
-        if (ground.kind === 'ekanagawa_kanagawa') {
-          result = await checkEKanagawaKanagawa(page, ground);
-        } else if (ground.kind === 'chigasaki') {
-          result = await checkChigasaki(page, ground);
-        } else {
-          result = await checkEKanagawa(page, ground);
+        switch (ground.kind) {
+          case 'ekanagawa': result = await checkEKanagawa(page, ground); break;
+          case 'chigasaki': result = await checkChigasaki(page, ground); break;
+          case 'chugai':    result = await checkChugai(page, ground);    break;
+          default: throw new Error(`未知のkind: ${ground.kind}`);
         }
 
         const groundResult = { name: ground.name, allSlots: result.available || [], newSlots: [] };
