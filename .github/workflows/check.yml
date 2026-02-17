@@ -12,35 +12,41 @@ permissions:
 jobs:
   check-availability:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 20  # ジョブ全体のタイムアウト（茅ヶ崎が重いため延長）
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+
       - run: npm install
+
       - run: npx playwright install chromium --with-deps
-      
+
       - uses: actions/cache@v4
         with:
           path: state.json
           key: notification-state-${{ github.run_id }}
           restore-keys: notification-state-
-      
+
       - id: check
         run: node check-github.js
+        env:
+          CHUGAI_LOGIN_ID: ${{ secrets.CHUGAI_LOGIN_ID }}
+          CHUGAI_PASSWORD: ${{ secrets.CHUGAI_PASSWORD }}
         continue-on-error: true
-      
+
       - if: steps.check.outputs.new_availability == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('result.json', 'utf8'));
-            
+
             let body = '新しい空き枠が見つかりました！\n\n';
-            
+
             result.forEach(item => {
               if (item.newSlots && item.newSlots.length > 0) {
                 body += `## 🎉 ${item.name}\n\n`;
@@ -50,19 +56,28 @@ jobs:
                 body += '\n';
               }
             });
-            
+
             body += `\n---\n検出時刻: ${new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'})}`;
-            
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🎉 グラウンド空き発見！ (${new Date().toLocaleDateString('ja-JP')})`,
+              title: `🎉 グラウンド空き発見！ (${new Date().toLocaleDateString('ja-JP', {timeZone: 'Asia/Tokyo'})})`,
               body: body,
               labels: ['空き通知']
             });
-      
+
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: state.json
           key: notification-state-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: check-logs-${{ github.run_number }}
+          path: |
+            *.log
+            *.json
+          retention-days: 7
