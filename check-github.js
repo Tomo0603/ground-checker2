@@ -20,20 +20,20 @@ const GROUNDS_CONFIG = [
     keywords: ['空き', '○', '◯', '空有']
   },
 
-  // 茅ヶ崎市（✅ 動作確認済み）
-  {
-    name: '茅ヶ崎・柳島スポーツ公園',
-    kind: 'chigasaki',
-    url: 'https://yoyaku.city.chigasaki.kanagawa.jp/cultos/reserve/gin_init2',
-    keywords: ['空き', '○', '◯', '空有']
-  },
+  // 茅ヶ崎市（タイムアウトのため一時無効 → 復活させたい場合はコメントを外す）
+  // {
+  //   name: '茅ヶ崎・柳島スポーツ公園',
+  //   kind: 'chigasaki',
+  //   url: 'https://yoyaku.city.chigasaki.kanagawa.jp/cultos/reserve/gin_init2',
+  //   keywords: ['空き', '○', '◯', '空有']
+  // },
 
   // 中外製薬横浜（✅ ログイン確認済み）
   {
     name: '中外製薬横浜グラウンド',
     kind: 'chugai',
     url: 'https://www.chugailspyokohamayoyaku.jp/chugai-pharm',
-    keywords: ['○', '◯', '空き', '予約可', '利用可']
+    keywords: ['○', '◯', '空き', '予約可', '利用可', '△']
   }
 ];
 
@@ -106,18 +106,6 @@ async function checkEKanagawa(page, ground) {
   return { available };
 }
 
-// ========== 茅ヶ崎チェック ==========
-
-async function checkChigasaki(page, ground) {
-  console.log(`  📍 URL: ${ground.url}`);
-  await page.goto(ground.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await page.waitForTimeout(5000);
-  console.log(`  📋 ページタイトル: ${await page.title()}`);
-  const available = extractAvailability(await page.content(), ground.keywords);
-  console.log(`  📊 検出結果: ${available.length}件の空き`);
-  return { available };
-}
-
 // ========== 中外製薬チェック（自動ログイン） ==========
 
 async function checkChugai(page, ground) {
@@ -140,7 +128,7 @@ async function checkChugai(page, ground) {
     // ID入力
     const idSelectors = [
       'input[type="text"]', 'input[name*="id" i]', 'input[name*="user" i]',
-      'input[name*="login" i]', 'input[id*="id" i]', 'input[id*="user" i]',
+      'input[name*="login" i]', 'input[id*="id" i]',
     ];
     for (const sel of idSelectors) {
       try {
@@ -158,67 +146,75 @@ async function checkChugai(page, ground) {
 
     await page.waitForTimeout(3000);
     await page.waitForLoadState('networkidle').catch(() => {});
-    console.log(`  ✓ ログイン後のページ: ${await page.title()}`);
+    console.log(`  ✓ ログイン後: ${await page.title()}`);
+    console.log(`  ✓ 現在URL: ${page.url()}`);
   }
 
-  // 予約ページへ移動
-  console.log('  🔗 予約ページへ移動中...');
-  const moved = await clickItem(page, '予約ページ');
-  if (moved) {
-    await page.waitForTimeout(3000);
-    await page.waitForLoadState('networkidle').catch(() => {});
-    console.log(`  ✓ 予約ページ遷移: ${await page.title()}`);
-  }
+  // 現在のページURLを確認
+  const currentUrl = page.url();
+  console.log(`  📍 現在のURL: ${currentUrl}`);
 
-  // デバッグ: ページ内リンク一覧
-  const links = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('a, button'))
-      .map(el => el.textContent?.trim())
-      .filter(t => t && t.length > 0 && t.length < 50)
-      .slice(0, 30)
+  // 全リンクのURLとテキストをデバッグ表示
+  const allLinks = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('a'))
+      .map(el => ({ text: el.textContent?.trim(), href: el.href }))
+      .filter(l => l.text && l.text.length > 0 && l.text.length < 50)
+      .slice(0, 20)
   );
-  console.log(`  💡 ページ内リンク: ${links.join(' | ')}`);
+  console.log(`  💡 全リンク:`);
+  allLinks.forEach(l => console.log(`     "${l.text}" → ${l.href}`));
 
-  // 空き情報の抽出
-  // テーブルセルの中で短いテキスト（○など）だけを対象にする
-  // FAQの長文テキストは除外
+  // 「店舗ページ」リンクのURLを取得して直接遷移
+  const shopLink = allLinks.find(l => l.text.includes('店舗ページ'));
+  if (shopLink && shopLink.href) {
+    console.log(`  🔗 店舗ページへ移動: ${shopLink.href}`);
+    await page.goto(shopLink.href, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(2000);
+    console.log(`  ✓ 遷移後ページ: ${await page.title()}`);
+    console.log(`  ✓ 遷移後URL: ${page.url()}`);
+
+    // 遷移後のリンクも確認
+    const shopLinks = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a'))
+        .map(el => ({ text: el.textContent?.trim(), href: el.href }))
+        .filter(l => l.text && l.text.length > 0 && l.text.length < 80)
+        .slice(0, 30)
+    );
+    console.log(`  💡 店舗ページのリンク:`);
+    shopLinks.forEach(l => console.log(`     "${l.text}" → ${l.href}`));
+  }
+
+  // カレンダーページのHTMLから空き情報を抽出
   const html = await page.content();
-  const availableSlots = [];
 
-  // <td>や<span>などの短いセルで空きキーワードを探す
-  const cellPattern = /<(?:td|th|span|div)[^>]*>([\s\S]*?)<\/(?:td|th|span|div)>/gi;
+  // テーブルセルで○などの短いキーワードを探す
+  const availableSlots = [];
+  const cellPattern = /<(?:td|th|span)[^>]*>([\s\S]*?)<\/(?:td|th|span)>/gi;
   let match;
   while ((match = cellPattern.exec(html)) !== null) {
     const cellText = match[1].replace(/<[^>]+>/g, '').trim();
-    // 空きキーワードを含み、かつ短いセル（30文字以下）だけ対象
-    if (cellText.length > 30) continue;
-    if (!ground.keywords.some(kw => cellText.includes(kw))) continue;
+    if (cellText.length > 20) continue;
+    if (!ground.keywords.some(kw => cellText === kw || cellText.includes(kw))) continue;
 
-    // このセルの前後からコンテキスト（日付・時間）を取得
     const pos = match.index;
-    const surroundingHtml = html.substring(Math.max(0, pos - 500), pos + 500);
-    const surroundingText = surroundingHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const surrounding = html.substring(Math.max(0, pos - 300), pos + 300)
+      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // 日付・時間が含まれているか確認
-    const hasDate = [/\d{1,2}月\d{1,2}日/, /\d{1,2}\/\d{1,2}/, /\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/].some(p => p.test(surroundingText));
-    const hasTime = [/\d{1,2}:\d{2}/, /午前|午後/, /\d{1,2}時/, /AM|PM/i].some(p => p.test(surroundingText));
+    const hasDate = [/\d{1,2}月\d{1,2}日/, /\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/].some(p => p.test(surrounding));
+    const hasTime = [/\d{1,2}:\d{2}/, /\d{1,2}時/, /午前|午後/].some(p => p.test(surrounding));
 
     if (hasDate || hasTime) {
-      // 日付と時間を抽出してスロット名を作成
-      const dateMatch = surroundingText.match(/(\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}月\d{1,2}日|\d{1,2}\/\d{1,2})/);
-      const timeMatch = surroundingText.match(/(\d{1,2}:\d{2}|\d{1,2}時[^\d]*(?:\d{1,2}分)?|午前|午後)/);
-
-      const dateStr = dateMatch ? dateMatch[0] : '';
-      const timeStr = timeMatch ? timeMatch[0] : '';
-      const slotKey = `${dateStr} ${timeStr} ${cellText}`.trim().substring(0, 80);
-
-      if (slotKey && !availableSlots.includes(slotKey)) {
-        availableSlots.push(slotKey);
-      }
+      const dateM = surrounding.match(/(\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}月\d{1,2}日)/);
+      const timeM = surrounding.match(/(\d{1,2}:\d{2}|\d{1,2}時|\d{1,2}時\d{2}分)/);
+      const slot = `${dateM?.[0] || ''} ${timeM?.[0] || ''} [${cellText}]`.trim();
+      if (!availableSlots.includes(slot)) availableSlots.push(slot);
     }
   }
 
   console.log(`  📊 検出結果: ${availableSlots.length}件の空き`);
+  if (availableSlots.length > 0) {
+    availableSlots.slice(0, 5).forEach(s => console.log(`     → ${s}`));
+  }
   return { available: availableSlots };
 }
 
@@ -249,7 +245,6 @@ async function main() {
         let result;
         switch (ground.kind) {
           case 'ekanagawa': result = await checkEKanagawa(page, ground); break;
-          case 'chigasaki': result = await checkChigasaki(page, ground); break;
           case 'chugai':    result = await checkChugai(page, ground);    break;
           default: throw new Error(`未知のkind: ${ground.kind}`);
         }
