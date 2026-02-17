@@ -4,44 +4,45 @@ import fs from 'fs';
 // ========== 設定 ==========
 
 const GROUNDS_CONFIG = [
-  // 神奈川県（e-kanagawaシステム）
+  // 神奈川県（e-kanagawa）
+  // ※ ログイン不要の空き照会ページに直接アクセス
   {
     name: '保土ケ谷公園 サッカー場',
-    kind: 'ekanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    kind: 'ekanagawa_kanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
     facilityPath: ['スポーツ施設', '保土ケ谷公園', 'サッカー場'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
     name: '保土ケ谷公園 ラグビー場全面',
-    kind: 'ekanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    kind: 'ekanagawa_kanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
     facilityPath: ['スポーツ施設', '保土ケ谷公園', 'ラグビー場全面'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
     name: '境川遊水地公園 多目的グラウンド',
-    kind: 'ekanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    kind: 'ekanagawa_kanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
     facilityPath: ['スポーツ施設', '境川遊水地公園', '多目的グラウンド'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
     name: '県立スポーツセンター 球技場（天然芝）',
-    kind: 'ekanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    kind: 'ekanagawa_kanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
     facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（天然芝）'],
     keywords: ['空き', '○', '◯', '空有']
   },
   {
     name: '県立スポーツセンター 球技場（人工芝）',
-    kind: 'ekanagawa',
-    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_ModeSelect.aspx',
+    kind: 'ekanagawa_kanagawa',
+    url: 'https://yoyaku.e-kanagawa.lg.jp/Kanagawa/Web/Wg_KoukyouShisetsuYoyakuMoushikomi.aspx',
     facilityPath: ['スポーツ施設', '県立スポーツセンター', '球技場（人工芝）'],
     keywords: ['空き', '○', '◯', '空有']
   },
 
-  // 海老名市（e-kanagawaシステム）
+  // 海老名市（e-kanagawa） ← 前回成功
   {
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
@@ -72,31 +73,24 @@ const STATE_FILE = 'state.json';
 
 function loadState() {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    }
+    if (fs.existsSync(STATE_FILE)) return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   } catch (e) {}
   return { notifiedSlots: [] };
 }
 
 function saveState(state) {
-  try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
-  } catch (e) {}
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8'); } catch (e) {}
 }
 
 function extractAvailability(html, keywords) {
   const availableSlots = [];
   const lines = html.split('\n');
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!keywords.some(kw => line.includes(kw))) continue;
-
     const context = lines.slice(Math.max(0, i - 2), i + 3).join(' ');
     const hasDate = [/\d{1,2}月\d{1,2}日/, /\d{1,2}\/\d{1,2}/, /\d{4}-\d{1,2}-\d{1,2}/].some(p => p.test(context));
     const hasTime = [/\d{1,2}:\d{2}/, /午前|午後/, /\d{1,2}時/].some(p => p.test(context));
-
     if (hasDate || hasTime) {
       const clean = context.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().substring(0, 100);
       if (clean && !availableSlots.includes(clean)) availableSlots.push(clean);
@@ -104,8 +98,6 @@ function extractAvailability(html, keywords) {
   }
   return availableSlots;
 }
-
-// ========== e-kanagawa チェック ==========
 
 async function clickItem(page, text) {
   return await page.evaluate((text) => {
@@ -116,50 +108,64 @@ async function clickItem(page, text) {
   }, text);
 }
 
-async function waitAndLog(page, ms, msg) {
-  if (msg) console.log(msg);
-  await page.waitForTimeout(ms);
-}
+// ========== 神奈川県チェック（直接URLアクセス） ==========
 
-async function checkEKanagawa(page, ground) {
+async function checkEKanagawaKanagawa(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
-
-  // 毎回トップページから新規アクセス
   await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
-  await waitAndLog(page, 2000);
+  await page.waitForTimeout(2000);
 
-  // ページ内の全リンクテキストを確認してデバッグ
-  const topOptions = await page.evaluate(() =>
+  const topOpts = await page.evaluate(() =>
     Array.from(document.querySelectorAll('a, input[type="submit"], button'))
-      .map(el => (el.textContent || el.value || '').trim())
-      .filter(t => t.length > 0)
+      .map(el => (el.textContent || el.value || '').trim()).filter(t => t.length > 0)
   );
-  console.log(`  📋 トップページのオプション: ${topOptions.join(' | ')}`);
+  console.log(`  📋 ページのオプション: ${topOpts.join(' | ')}`);
 
-  // facilityPath を順番にクリック
-  for (let i = 0; i < ground.facilityPath.length; i++) {
-    const pathItem = ground.facilityPath[i];
+  for (const pathItem of ground.facilityPath) {
     console.log(`  🔽 "${pathItem}" を選択中...`);
-
     const clicked = await clickItem(page, pathItem);
     if (!clicked) {
-      // 見つからない場合は現在のオプションを表示
       const opts = await page.evaluate(() =>
         Array.from(document.querySelectorAll('a, input[type="submit"], button'))
           .map(el => (el.textContent || el.value || '').trim())
-          .filter(t => t.length > 0 && t.length < 80)
-          .slice(0, 30)
+          .filter(t => t.length > 0 && t.length < 80).slice(0, 30)
       );
       console.log(`  💡 現在のオプション: ${opts.join(' | ')}`);
       throw new Error(`"${pathItem}" が見つかりません`);
     }
-
     console.log(`  ✓ "${pathItem}" を選択`);
-    await waitAndLog(page, 2000);
+    await page.waitForTimeout(2000);
   }
 
-  const html = await page.content();
-  const available = extractAvailability(html, ground.keywords);
+  const available = extractAvailability(await page.content(), ground.keywords);
+  console.log(`  📊 検出結果: ${available.length}件の空き`);
+  return { available };
+}
+
+// ========== 海老名チェック ==========
+
+async function checkEKanagawa(page, ground) {
+  console.log(`  📍 URL: ${ground.url}`);
+  await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.waitForTimeout(2000);
+
+  for (const pathItem of ground.facilityPath) {
+    console.log(`  🔽 "${pathItem}" を選択中...`);
+    const clicked = await clickItem(page, pathItem);
+    if (!clicked) {
+      const opts = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('a, input[type="submit"], button'))
+          .map(el => (el.textContent || el.value || '').trim())
+          .filter(t => t.length > 0 && t.length < 80).slice(0, 30)
+      );
+      console.log(`  💡 現在のオプション: ${opts.join(' | ')}`);
+      throw new Error(`"${pathItem}" が見つかりません`);
+    }
+    console.log(`  ✓ "${pathItem}" を選択`);
+    await page.waitForTimeout(2000);
+  }
+
+  const available = extractAvailability(await page.content(), ground.keywords);
   console.log(`  📊 検出結果: ${available.length}件の空き`);
   return { available };
 }
@@ -199,12 +205,16 @@ async function main() {
       const page = await browser.newPage();
 
       try {
-        const result = ground.kind === 'chigasaki'
-          ? await checkChigasaki(page, ground)
-          : await checkEKanagawa(page, ground);
+        let result;
+        if (ground.kind === 'ekanagawa_kanagawa') {
+          result = await checkEKanagawaKanagawa(page, ground);
+        } else if (ground.kind === 'chigasaki') {
+          result = await checkChigasaki(page, ground);
+        } else {
+          result = await checkEKanagawa(page, ground);
+        }
 
         const groundResult = { name: ground.name, allSlots: result.available || [], newSlots: [] };
-
         for (const slot of result.available || []) {
           const key = `${ground.name}|${slot}`;
           if (!notifiedSet.has(key)) {
@@ -214,7 +224,6 @@ async function main() {
             newAvailabilityFound = true;
           }
         }
-
         results.push(groundResult);
       } catch (error) {
         console.error(`  ❌ エラー: ${error.message}`);
@@ -236,7 +245,6 @@ async function main() {
   }
 
   fs.writeFileSync('result.json', JSON.stringify(results, null, 2), 'utf8');
-
   if (process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `new_availability=${newAvailabilityFound}\n`);
   }
