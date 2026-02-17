@@ -4,7 +4,7 @@ import fs from 'fs';
 // ========== 設定 ==========
 
 const GROUNDS_CONFIG = [
-  // 海老名市（動作確認済み ✅）
+  // 海老名市（✅ 動作確認済み）
   {
     name: '海老名運動公園陸上競技場 陸上競技場',
     kind: 'ekanagawa',
@@ -20,7 +20,7 @@ const GROUNDS_CONFIG = [
     keywords: ['空き', '○', '◯', '空有']
   },
 
-  // 茅ヶ崎市
+  // 茅ヶ崎市（✅ 動作確認済み）
   {
     name: '茅ヶ崎・柳島スポーツ公園',
     kind: 'chigasaki',
@@ -28,12 +28,12 @@ const GROUNDS_CONFIG = [
     keywords: ['空き', '○', '◯', '空有']
   },
 
-  // 中外製薬横浜（自動ログイン）
+  // 中外製薬横浜（✅ ログイン確認済み）
   {
     name: '中外製薬横浜グラウンド',
     kind: 'chugai',
     url: 'https://www.chugailspyokohamayoyaku.jp/chugai-pharm',
-    keywords: ['空き', '○', '◯', '予約可', '利用可']
+    keywords: ['○', '◯', '空き', '予約可', '利用可']
   }
 ];
 
@@ -78,7 +78,7 @@ async function clickItem(page, text) {
   }, text);
 }
 
-// ========== 海老名チェック（✅ 動作確認済み） ==========
+// ========== 海老名チェック ==========
 
 async function checkEKanagawa(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
@@ -106,18 +106,13 @@ async function checkEKanagawa(page, ground) {
   return { available };
 }
 
-// ========== 茅ヶ崎チェック（タイムアウト対策済み） ==========
+// ========== 茅ヶ崎チェック ==========
 
 async function checkChigasaki(page, ground) {
   console.log(`  📍 URL: ${ground.url}`);
-
-  // networkidle ではなく domcontentloaded で待機 + タイムアウト延長
   await page.goto(ground.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await page.waitForTimeout(5000);
-
-  const title = await page.title();
-  console.log(`  📋 ページタイトル: ${title}`);
-
+  console.log(`  📋 ページタイトル: ${await page.title()}`);
   const available = extractAvailability(await page.content(), ground.keywords);
   console.log(`  📊 検出結果: ${available.length}件の空き`);
   return { available };
@@ -130,81 +125,101 @@ async function checkChugai(page, ground) {
   const password = process.env.CHUGAI_PASSWORD;
 
   if (!loginId || !password) {
-    throw new Error('CHUGAI_LOGIN_ID または CHUGAI_PASSWORD が未設定です（GitHub Secretsを確認）');
+    throw new Error('CHUGAI_LOGIN_ID または CHUGAI_PASSWORD が未設定です');
   }
 
   console.log(`  📍 URL: ${ground.url}`);
   await page.goto(ground.url, { waitUntil: 'networkidle', timeout: 30000 });
   await page.waitForTimeout(2000);
 
-  const title = await page.title();
-  console.log(`  📋 ページタイトル: ${title}`);
-
-  // ログインフォームの検出
+  // ログイン処理
   const hasPassword = await page.$('input[type="password"]');
   if (hasPassword) {
-    console.log('  🔐 ログインページを検出 → 自動ログイン中...');
+    console.log('  🔐 自動ログイン中...');
 
-    // ID入力（複数のセレクタを試す）
+    // ID入力
     const idSelectors = [
-      'input[type="text"]',
-      'input[name*="id" i]',
-      'input[name*="user" i]',
-      'input[name*="login" i]',
-      'input[id*="id" i]',
-      'input[id*="user" i]',
+      'input[type="text"]', 'input[name*="id" i]', 'input[name*="user" i]',
+      'input[name*="login" i]', 'input[id*="id" i]', 'input[id*="user" i]',
     ];
     for (const sel of idSelectors) {
       try {
         const el = await page.$(sel);
-        if (el) {
-          await el.fill(loginId);
-          console.log(`  ✓ ID入力完了`);
-          break;
-        }
+        if (el) { await el.fill(loginId); console.log(`  ✓ ID入力完了`); break; }
       } catch (e) {}
     }
 
-    // パスワード入力
     await page.fill('input[type="password"]', password);
     console.log('  ✓ パスワード入力完了');
 
-    // ログインボタンクリック
-    const loginBtns = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      'button:has-text("ログイン")',
-      'input[value*="ログイン"]',
-      'input[value*="LOGIN"]',
-      'button:has-text("Sign")',
-    ];
-    for (const sel of loginBtns) {
-      try {
-        await page.click(sel);
-        console.log(`  ✓ ログインボタンクリック`);
-        break;
-      } catch (e) {}
+    for (const sel of ['button[type="submit"]', 'input[type="submit"]', 'input[value*="ログイン"]']) {
+      try { await page.click(sel); console.log(`  ✓ ログインボタンクリック`); break; } catch (e) {}
     }
 
     await page.waitForTimeout(3000);
     await page.waitForLoadState('networkidle').catch(() => {});
     console.log(`  ✓ ログイン後のページ: ${await page.title()}`);
-  } else {
-    console.log('  ℹ️ ログイン不要 or 既にログイン済み');
   }
 
-  // ページ内のリンクをデバッグ表示
+  // 予約ページへ移動
+  console.log('  🔗 予約ページへ移動中...');
+  const moved = await clickItem(page, '予約ページ');
+  if (moved) {
+    await page.waitForTimeout(3000);
+    await page.waitForLoadState('networkidle').catch(() => {});
+    console.log(`  ✓ 予約ページ遷移: ${await page.title()}`);
+  }
+
+  // デバッグ: ページ内リンク一覧
   const links = await page.evaluate(() =>
     Array.from(document.querySelectorAll('a, button'))
       .map(el => el.textContent?.trim())
       .filter(t => t && t.length > 0 && t.length < 50)
-      .slice(0, 20)
+      .slice(0, 30)
   );
   console.log(`  💡 ページ内リンク: ${links.join(' | ')}`);
 
-  const available = extractAvailability(await page.content(), ground.keywords);
-  console.log(`  📊 検出結果: ${available.length}件の空き`);
-  return { available };
+  // 空き情報の抽出
+  // テーブルセルの中で短いテキスト（○など）だけを対象にする
+  // FAQの長文テキストは除外
+  const html = await page.content();
+  const availableSlots = [];
+
+  // <td>や<span>などの短いセルで空きキーワードを探す
+  const cellPattern = /<(?:td|th|span|div)[^>]*>([\s\S]*?)<\/(?:td|th|span|div)>/gi;
+  let match;
+  while ((match = cellPattern.exec(html)) !== null) {
+    const cellText = match[1].replace(/<[^>]+>/g, '').trim();
+    // 空きキーワードを含み、かつ短いセル（30文字以下）だけ対象
+    if (cellText.length > 30) continue;
+    if (!ground.keywords.some(kw => cellText.includes(kw))) continue;
+
+    // このセルの前後からコンテキスト（日付・時間）を取得
+    const pos = match.index;
+    const surroundingHtml = html.substring(Math.max(0, pos - 500), pos + 500);
+    const surroundingText = surroundingHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // 日付・時間が含まれているか確認
+    const hasDate = [/\d{1,2}月\d{1,2}日/, /\d{1,2}\/\d{1,2}/, /\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/].some(p => p.test(surroundingText));
+    const hasTime = [/\d{1,2}:\d{2}/, /午前|午後/, /\d{1,2}時/, /AM|PM/i].some(p => p.test(surroundingText));
+
+    if (hasDate || hasTime) {
+      // 日付と時間を抽出してスロット名を作成
+      const dateMatch = surroundingText.match(/(\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}月\d{1,2}日|\d{1,2}\/\d{1,2})/);
+      const timeMatch = surroundingText.match(/(\d{1,2}:\d{2}|\d{1,2}時[^\d]*(?:\d{1,2}分)?|午前|午後)/);
+
+      const dateStr = dateMatch ? dateMatch[0] : '';
+      const timeStr = timeMatch ? timeMatch[0] : '';
+      const slotKey = `${dateStr} ${timeStr} ${cellText}`.trim().substring(0, 80);
+
+      if (slotKey && !availableSlots.includes(slotKey)) {
+        availableSlots.push(slotKey);
+      }
+    }
+  }
+
+  console.log(`  📊 検出結果: ${availableSlots.length}件の空き`);
+  return { available: availableSlots };
 }
 
 // ========== メイン ==========
